@@ -154,11 +154,13 @@ function App() {
         }}
       />
 
-      <BacktestModal 
-        isOpen={isBacktestOpen}
-        onClose={() => setIsBacktestOpen(false)}
-        initialProduct={backtestProduct}
-      />
+      {isBacktestOpen && (
+        <BacktestModal 
+          isOpen={isBacktestOpen}
+          onClose={() => setIsBacktestOpen(false)}
+          initialProduct={backtestProduct}
+        />
+      )}
     </div>
   );
 }

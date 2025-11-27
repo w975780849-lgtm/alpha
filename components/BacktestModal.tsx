@@ -1,3 +1,4 @@
+
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -16,9 +17,12 @@ interface BacktestModalProps {
 const TIMEFRAMES = ['1M', '3M', '6M', '1Y', 'YTD'];
 
 const BacktestModal: React.FC<BacktestModalProps> = ({ isOpen, onClose, initialProduct }) => {
-  const algoProducts = PRODUCTS.filter(p => p.category === '算法');
+  const algoProducts = useMemo(() => PRODUCTS.filter(p => p.category === '算法'), []);
   
-  const [selectedAlgoId, setSelectedAlgoId] = useState<string>(initialProduct?.id || algoProducts[0]?.id);
+  // Ensure we have a valid default ID to prevent crashes
+  const defaultAlgoId = algoProducts.length > 0 ? algoProducts[0].id : '';
+
+  const [selectedAlgoId, setSelectedAlgoId] = useState<string>(initialProduct?.id || defaultAlgoId);
   const [timeframe, setTimeframe] = useState('6M');
   const [isAnimating, setIsAnimating] = useState(false);
   
@@ -27,7 +31,7 @@ const BacktestModal: React.FC<BacktestModalProps> = ({ isOpen, onClose, initialP
     if (initialProduct && algoProducts.find(p => p.id === initialProduct.id)) {
       setSelectedAlgoId(initialProduct.id);
     }
-  }, [initialProduct]);
+  }, [initialProduct, algoProducts]);
 
   useEffect(() => {
     if (isOpen) {
@@ -39,12 +43,18 @@ const BacktestModal: React.FC<BacktestModalProps> = ({ isOpen, onClose, initialP
 
   // Mock Data Generation
   const simulationData = useMemo(() => {
+    if (!selectedAlgoId) return [];
+
     const points = 100;
     const data = [];
     let value = 10000;
     
     // Seed logic based on Algo ID to make it deterministic but different per algo
     const algoIndex = algoProducts.findIndex(p => p.id === selectedAlgoId);
+    
+    // Fallback if ID not found (safe guard)
+    if (algoIndex === -1) return [];
+
     const volatility = algoIndex === 0 ? 0.02 : 0.012; // First algo (Momentum) is more volatile
     const trend = algoIndex === 0 ? 0.0015 : 0.0008; // Momentum has higher trend
     
@@ -61,9 +71,23 @@ const BacktestModal: React.FC<BacktestModalProps> = ({ isOpen, onClose, initialP
         data.push(value);
     }
     return data;
-  }, [selectedAlgoId, timeframe]);
+  }, [selectedAlgoId, timeframe, algoProducts]);
 
   // Metrics Calculation
+  if (!simulationData || simulationData.length === 0) {
+      // Return empty state or null if no data
+      if (!isOpen) return null;
+      return (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center">
+            <div className="absolute inset-0 bg-slate-900/90 backdrop-blur-md" onClick={onClose} />
+            <div className="relative bg-slate-900 p-8 border border-slate-700 text-white shadow-xl">
+                 <p>正在初始化数据模型...</p>
+                 <button onClick={onClose} className="mt-4 text-blue-400 text-sm">关闭</button>
+            </div>
+        </div>
+      );
+  }
+
   const startValue = simulationData[0];
   const endValue = simulationData[simulationData.length - 1];
   const totalReturn = ((endValue - startValue) / startValue) * 100;
@@ -86,7 +110,7 @@ const BacktestModal: React.FC<BacktestModalProps> = ({ isOpen, onClose, initialP
   
   const points = simulationData.map((val, idx) => {
     const x = (idx / (simulationData.length - 1)) * width;
-    const y = height - ((val - minVal) / range) * (height - 40) - 20; // Padding
+    const y = height - ((val - minVal) / (range || 1)) * (height - 40) - 20; // Padding, avoid div by zero
     return `${x},${y}`;
   }).join(' ');
 

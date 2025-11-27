@@ -1,3 +1,4 @@
+
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -28,16 +29,18 @@ export const sendMessageToGemini = async (history: {role: string, text: string}[
   try {
     let apiKey: string | undefined;
     
-    // Robustly attempt to get the API key, handling ReferenceError if process is not defined
+    // Robustly attempt to get the API key, handling potential ReferenceError
     try {
-      apiKey = process.env.API_KEY;
+      if (typeof process !== 'undefined' && process.env) {
+        apiKey = process.env.API_KEY;
+      }
     } catch (e) {
-      // process is likely not defined in this environment
-      console.warn("Accessing process.env failed");
+      console.warn("Accessing process.env failed, possibly in a browser environment without polyfills.");
     }
     
     if (!apiKey) {
-      return "连接 AlphaQuant 服务器失败。（缺少 API 密钥）";
+      console.warn("API Key is missing. Ensure process.env.API_KEY is available.");
+      return "连接 AlphaQuant 服务器失败。 (Error: Missing API Key)";
     }
 
     const ai = new GoogleGenAI({ apiKey });
