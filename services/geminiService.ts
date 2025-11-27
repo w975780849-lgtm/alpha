@@ -1,4 +1,3 @@
-
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -25,22 +24,26 @@ const getSystemInstruction = () => {
   保持回答简洁（通常在3句话以内）。请用中文回答。`;
 };
 
+// Safe way to get API Key without crashing in browsers
+const getApiKey = (): string | undefined => {
+  try {
+    // Check if process exists globally and has env property
+    if (typeof process !== 'undefined' && process && process.env) {
+      return process.env.API_KEY;
+    }
+  } catch (e) {
+    // Ignore reference errors
+  }
+  return undefined;
+};
+
 export const sendMessageToGemini = async (history: {role: string, text: string}[], newMessage: string): Promise<string> => {
   try {
-    let apiKey: string | undefined;
-    
-    // Robustly attempt to get the API key, handling potential ReferenceError
-    try {
-      if (typeof process !== 'undefined' && process.env) {
-        apiKey = process.env.API_KEY;
-      }
-    } catch (e) {
-      console.warn("Accessing process.env failed, possibly in a browser environment without polyfills.");
-    }
+    const apiKey = getApiKey();
     
     if (!apiKey) {
       console.warn("API Key is missing. Ensure process.env.API_KEY is available.");
-      return "连接 AlphaQuant 服务器失败。 (Error: Missing API Key)";
+      return "连接 AlphaQuant 服务器失败。API Key 未配置。";
     }
 
     const ai = new GoogleGenAI({ apiKey });

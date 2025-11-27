@@ -1,4 +1,3 @@
-
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -19,19 +18,26 @@ const TIMEFRAMES = ['1M', '3M', '6M', '1Y', 'YTD'];
 const BacktestModal: React.FC<BacktestModalProps> = ({ isOpen, onClose, initialProduct }) => {
   const algoProducts = useMemo(() => PRODUCTS.filter(p => p.category === '算法'), []);
   
-  // Ensure we have a valid default ID to prevent crashes
+  // Safe default ID
   const defaultAlgoId = algoProducts.length > 0 ? algoProducts[0].id : '';
 
-  const [selectedAlgoId, setSelectedAlgoId] = useState<string>(initialProduct?.id || defaultAlgoId);
+  // Use a string for ID to avoid undefined issues
+  const [selectedAlgoId, setSelectedAlgoId] = useState<string>(() => {
+    if (initialProduct?.id && algoProducts.find(p => p.id === initialProduct.id)) {
+        return initialProduct.id;
+    }
+    return defaultAlgoId;
+  });
+
   const [timeframe, setTimeframe] = useState('6M');
   const [isAnimating, setIsAnimating] = useState(false);
   
-  // Reset selection if initialProduct changes
+  // Update selection if initialProduct changes and modal is open
   useEffect(() => {
-    if (initialProduct && algoProducts.find(p => p.id === initialProduct.id)) {
+    if (isOpen && initialProduct && algoProducts.find(p => p.id === initialProduct.id)) {
       setSelectedAlgoId(initialProduct.id);
     }
-  }, [initialProduct, algoProducts]);
+  }, [isOpen, initialProduct, algoProducts]);
 
   useEffect(() => {
     if (isOpen) {
@@ -46,20 +52,22 @@ const BacktestModal: React.FC<BacktestModalProps> = ({ isOpen, onClose, initialP
     if (!selectedAlgoId) return [];
 
     const points = 100;
-    const data = [];
+    const data: number[] = [];
     let value = 10000;
     
-    // Seed logic based on Algo ID to make it deterministic but different per algo
+    // Seed logic based on Algo ID
     const algoIndex = algoProducts.findIndex(p => p.id === selectedAlgoId);
     
-    // Fallback if ID not found (safe guard)
+    // Safety check
     if (algoIndex === -1) return [];
 
     const volatility = algoIndex === 0 ? 0.02 : 0.012; // First algo (Momentum) is more volatile
     const trend = algoIndex === 0 ? 0.0015 : 0.0008; // Momentum has higher trend
     
-    // Simple Pseudo-random generator
-    let seed = selectedAlgoId.charCodeAt(0) + timeframe.length;
+    // Safe seed generation
+    const seedStr = selectedAlgoId || 'default';
+    let seed = seedStr.charCodeAt(0) + timeframe.length;
+    
     const random = () => {
         const x = Math.sin(seed++) * 10000;
         return x - Math.floor(x);
@@ -73,48 +81,46 @@ const BacktestModal: React.FC<BacktestModalProps> = ({ isOpen, onClose, initialP
     return data;
   }, [selectedAlgoId, timeframe, algoProducts]);
 
-  // Metrics Calculation
-  if (!simulationData || simulationData.length === 0) {
-      // Return empty state or null if no data
-      if (!isOpen) return null;
-      return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center">
-            <div className="absolute inset-0 bg-slate-900/90 backdrop-blur-md" onClick={onClose} />
-            <div className="relative bg-slate-900 p-8 border border-slate-700 text-white shadow-xl">
-                 <p>正在初始化数据模型...</p>
-                 <button onClick={onClose} className="mt-4 text-blue-400 text-sm">关闭</button>
-            </div>
-        </div>
-      );
-  }
-
-  const startValue = simulationData[0];
-  const endValue = simulationData[simulationData.length - 1];
-  const totalReturn = ((endValue - startValue) / startValue) * 100;
-  
-  // Calculate Drawdown
-  let peak = -Infinity;
-  let maxDrawdown = 0;
-  simulationData.forEach(v => {
-    if (v > peak) peak = v;
-    const dd = (peak - v) / peak;
-    if (dd > maxDrawdown) maxDrawdown = dd;
-  });
-
-  // SVG Chart Logic
-  const width = 800;
-  const height = 300;
-  const minVal = Math.min(...simulationData);
-  const maxVal = Math.max(...simulationData);
-  const range = maxVal - minVal;
-  
-  const points = simulationData.map((val, idx) => {
-    const x = (idx / (simulationData.length - 1)) * width;
-    const y = height - ((val - minVal) / (range || 1)) * (height - 40) - 20; // Padding, avoid div by zero
-    return `${x},${y}`;
-  }).join(' ');
-
   if (!isOpen) return null;
+
+  // Defensive metrics calculation
+  let totalReturn = 0;
+  let maxDrawdown = 0;
+  let chartPath = '';
+  
+  const hasData = simulationData && simulationData.length > 0;
+
+  if (hasData) {
+      const startValue = simulationData[0];
+      const endValue = simulationData[simulationData.length - 1];
+      totalReturn = ((endValue - startValue) / startValue) * 100;
+      
+      // Calculate Drawdown
+      let peak = -Infinity;
+      simulationData.forEach(v => {
+        if (v > peak) peak = v;
+        const dd = (peak - v) / peak;
+        if (dd > maxDrawdown) maxDrawdown = dd;
+      });
+
+      // SVG Chart Logic
+      const width = 800;
+      const height = 300;
+      const minVal = Math.min(...simulationData);
+      const maxVal = Math.max(...simulationData);
+      const range = maxVal - minVal;
+      
+      // Prevent division by zero if flat line
+      const safeRange = range === 0 ? 1 : range;
+
+      chartPath = simulationData.map((val, idx) => {
+        const x = (idx / (simulationData.length - 1)) * width;
+        const y = height - ((val - minVal) / safeRange) * (height - 40) - 20; 
+        // Ensure not NaN
+        if (isNaN(x) || isNaN(y)) return `0,${height}`;
+        return `${x},${y}`;
+      }).join(' ');
+  }
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
@@ -180,77 +186,85 @@ const BacktestModal: React.FC<BacktestModalProps> = ({ isOpen, onClose, initialP
                 </button>
             </div>
 
-            {/* Metrics Bar */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-8 border-b border-slate-800">
-                <div>
-                    <span className="text-xs text-slate-500 uppercase tracking-wider block mb-1">总回报</span>
-                    <span className={`text-2xl font-mono ${totalReturn >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {totalReturn > 0 ? '+' : ''}{totalReturn.toFixed(2)}%
-                    </span>
-                </div>
-                <div>
-                    <span className="text-xs text-slate-500 uppercase tracking-wider block mb-1">最大回撤</span>
-                    <span className="text-2xl font-mono text-red-400">
-                        -{(maxDrawdown * 100).toFixed(2)}%
-                    </span>
-                </div>
-                <div>
-                    <span className="text-xs text-slate-500 uppercase tracking-wider block mb-1">夏普比率</span>
-                    <span className="text-2xl font-mono text-slate-200">
-                        {(1.5 + (totalReturn / 100)).toFixed(2)}
-                    </span>
-                </div>
-                 <div>
-                    <span className="text-xs text-slate-500 uppercase tracking-wider block mb-1">交易次数</span>
-                    <span className="text-2xl font-mono text-slate-200">
-                        {Math.floor(simulationData.length * 0.4)}
-                    </span>
-                </div>
-            </div>
-
-            {/* Chart Container */}
-            <div className="flex-1 p-8 relative">
-                 <div className="absolute inset-x-8 inset-y-8 border border-slate-800 bg-slate-900/50">
-                    {/* Grid Lines */}
-                    {[0, 1, 2, 3, 4].map(i => (
-                        <div key={i} className="absolute w-full border-t border-slate-800" style={{ top: `${i * 25}%` }}></div>
-                    ))}
-                    {[0, 1, 2, 3, 4].map(i => (
-                        <div key={i} className="absolute h-full border-l border-slate-800" style={{ left: `${i * 25}%` }}></div>
-                    ))}
-
-                    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible preserve-3d">
-                        <defs>
-                            <linearGradient id="chartGradient" x1="0" x2="0" y1="0" y2="1">
-                                <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.5"/>
-                                <stop offset="100%" stopColor="#3b82f6" stopOpacity="0"/>
-                            </linearGradient>
-                        </defs>
-                        {/* Area under curve */}
-                        <path 
-                             d={`${points} L ${width},${height} L 0,${height} Z`} 
-                             fill="url(#chartGradient)" 
-                             className="opacity-20"
-                        />
-                        {/* Line */}
-                        <path 
-                            d={`M ${points}`} 
-                            fill="none" 
-                            stroke="#3b82f6" 
-                            strokeWidth="2" 
-                            vectorEffect="non-scaling-stroke"
-                            className={isAnimating ? 'animate-draw-line' : ''}
-                            strokeDasharray={isAnimating ? "2000" : "none"}
-                            strokeDashoffset={isAnimating ? "2000" : "0"}
-                        />
-                    </svg>
-
-                    {/* Chart Tooltip / Cursor Mockup */}
-                    <div className="absolute top-4 right-4 bg-slate-800 px-3 py-1 text-xs font-mono text-white border border-slate-600 rounded">
-                        模拟表现
+            {hasData ? (
+                <>
+                {/* Metrics Bar */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-8 border-b border-slate-800">
+                    <div>
+                        <span className="text-xs text-slate-500 uppercase tracking-wider block mb-1">总回报</span>
+                        <span className={`text-2xl font-mono ${totalReturn >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {totalReturn > 0 ? '+' : ''}{totalReturn.toFixed(2)}%
+                        </span>
                     </div>
-                 </div>
-            </div>
+                    <div>
+                        <span className="text-xs text-slate-500 uppercase tracking-wider block mb-1">最大回撤</span>
+                        <span className="text-2xl font-mono text-red-400">
+                            -{(maxDrawdown * 100).toFixed(2)}%
+                        </span>
+                    </div>
+                    <div>
+                        <span className="text-xs text-slate-500 uppercase tracking-wider block mb-1">夏普比率</span>
+                        <span className="text-2xl font-mono text-slate-200">
+                            {(1.5 + (totalReturn / 100)).toFixed(2)}
+                        </span>
+                    </div>
+                    <div>
+                        <span className="text-xs text-slate-500 uppercase tracking-wider block mb-1">交易次数</span>
+                        <span className="text-2xl font-mono text-slate-200">
+                            {Math.floor(simulationData.length * 0.4)}
+                        </span>
+                    </div>
+                </div>
+
+                {/* Chart Container */}
+                <div className="flex-1 p-8 relative">
+                    <div className="absolute inset-x-8 inset-y-8 border border-slate-800 bg-slate-900/50">
+                        {/* Grid Lines */}
+                        {[0, 1, 2, 3, 4].map(i => (
+                            <div key={i} className="absolute w-full border-t border-slate-800" style={{ top: `${i * 25}%` }}></div>
+                        ))}
+                        {[0, 1, 2, 3, 4].map(i => (
+                            <div key={i} className="absolute h-full border-l border-slate-800" style={{ left: `${i * 25}%` }}></div>
+                        ))}
+
+                        <svg viewBox={`0 0 800 300`} className="w-full h-full overflow-visible preserve-3d">
+                            <defs>
+                                <linearGradient id="chartGradient" x1="0" x2="0" y1="0" y2="1">
+                                    <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.5"/>
+                                    <stop offset="100%" stopColor="#3b82f6" stopOpacity="0"/>
+                                </linearGradient>
+                            </defs>
+                            {/* Area under curve */}
+                            <path 
+                                d={`${chartPath} L 800,300 L 0,300 Z`} 
+                                fill="url(#chartGradient)" 
+                                className="opacity-20"
+                            />
+                            {/* Line */}
+                            <path 
+                                d={`M ${chartPath}`} 
+                                fill="none" 
+                                stroke="#3b82f6" 
+                                strokeWidth="2" 
+                                vectorEffect="non-scaling-stroke"
+                                className={isAnimating ? 'animate-draw-line' : ''}
+                                strokeDasharray={isAnimating ? "2000" : "none"}
+                                strokeDashoffset={isAnimating ? "2000" : "0"}
+                            />
+                        </svg>
+
+                        {/* Chart Tooltip / Cursor Mockup */}
+                        <div className="absolute top-4 right-4 bg-slate-800 px-3 py-1 text-xs font-mono text-white border border-slate-600 rounded">
+                            模拟表现
+                        </div>
+                    </div>
+                </div>
+                </>
+            ) : (
+                <div className="flex-1 flex items-center justify-center text-slate-500">
+                    <p>请选择一个策略进行模拟。</p>
+                </div>
+            )}
         </div>
       </div>
       <style>{`
